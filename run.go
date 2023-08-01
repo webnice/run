@@ -252,7 +252,7 @@ func (run *impl) Release() error {
 
 // Reset Завершение приложения, если оно было запущено, сброс всех настроек и подготовка пакета для
 // повторного использования.
-func (run *impl) Reset() {
+func (run *impl) Reset() Interface {
 	const tryCount = 4
 	var (
 		err  error
@@ -290,4 +290,6 @@ func (run *impl) Reset() {
 	run.processSync.Unlock()
 	run.debugMode = false
 	run.err = run.init()
+
+	return run
 }
