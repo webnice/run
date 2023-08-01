@@ -1,8 +1,8 @@
 # Run
 
 ---
-[![GoDoc](https://godoc.org/gopkg.in/webnice/run.v1/run?status.svg)](https://godoc.org/gopkg.in/webnice/run.v1/run)
-[![Go Report Card](https://goreportcard.com/badge/gopkg.in/webnice/run.v1)](https://goreportcard.com/report/gopkg.in/webnice/run.v1)
+[![GoDoc](https://godoc.org/github.com/webnice/run/run?status.svg)](https://godoc.org/github.com/webnice/run/run)
+[![Go Report Card](https://goreportcard.com/badge/github.com/webnice/run)](https://goreportcard.com/report/github.com/webnice/run)
 [![Coverage Status](https://coveralls.io/repos/github/webnice/run/badge.svg?branch=v1)](https://coveralls.io/github/webnice/run?branch=v1)
 
 ### run
