@@ -127,7 +127,9 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 		// Обработка сигнала завершения обработки данных после завершения работы процесса.
 		case <-ctx.Done():
 			run.debug("получен сигнал прерывания через контекст")
-			end, err = true, run.Kill()
+			if end, err = true, run.Kill(); run.err == nil && err != nil {
+				run.err = err
+			}
 			continue
 		// Событие поступление новых данных в функцию STDIN.
 		case <-run.onNewData:
