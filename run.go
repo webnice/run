@@ -147,7 +147,7 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 		processCancel()
 		return run
 	}
-	if proc, run.err = exec.LookPath(args[0]); run.err != nil {
+	if proc = run.LookPath(args[0]); run.err != nil {
 		processCancel()
 		run.err = fmt.Errorf("поиск программы %q прерван ошибкой: %s", args[0], run.err)
 		return run
@@ -216,6 +216,10 @@ func (run *impl) Wait() (ret *os.ProcessState, err error) {
 
 	return
 }
+
+// LookPath Выполнение одноимённой утилиты exec.LookPath(), чтобы тыла под рукой,
+// Ошибку выполнения функции можно получить через Error().
+func (run *impl) LookPath(proc string) (ret string) { ret, run.err = exec.LookPath(proc); return }
 
 // Pid Возвращает PID процесса. Если процесс не был запущен, возвращается -1.
 func (run *impl) Pid() int {

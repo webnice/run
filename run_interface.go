@@ -79,6 +79,10 @@ type Interface interface {
 	// Wait Ожидание завершения ранее запущенного приложения.
 	Wait() (ret *os.ProcessState, err error)
 
+	// LookPath Выполнение одноимённой утилиты exec.LookPath(), чтобы тыла под рукой,
+	// Ошибку выполнения функции можно получить через Error().
+	LookPath(proc string) (path string)
+
 	// Pid Возвращает PID процесса. Если процесс не был запущен, возвращается -1.
 	Pid() int
 
