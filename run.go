@@ -168,9 +168,9 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 	// Запуск процесса.
 	run.cmd = make([]string, 0, len(args))
 	run.cmd = append([]string{proc}, args[1:]...)
-	run.debug("выполнение программы: %s", strings.Join(run.cmd, " "))
+	run.debug("запуск процесса: %s", strings.Join(run.cmd, " "))
 	if run.process, run.err = os.StartProcess(proc, run.cmd, run.attributes); run.err != nil {
-		run.err = fmt.Errorf("выполнение программы %q прервано ошибкой: %s", proc, run.err)
+		run.err = fmt.Errorf("выполнение процесса %q прервано ошибкой: %s", proc, run.err)
 		processCancel()
 		return run
 	}
