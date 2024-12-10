@@ -206,12 +206,17 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 // Если передан контекст не равный nil, тогда прерывание через контекст завершает работу приложения аналогично
 // вызову функции Kill().
 func (run *impl) RunWait(ctx context.Context, args ...string) (ret *os.ProcessState, err error) {
+	const errAlreadyFinished = "already finished"
+
 	if err = run.
 		Run(ctx, args...).
 		Error(); err != nil {
 		return
 	}
 	if ret, err = run.Wait(); err != nil {
+		if strings.Contains(err.Error(), errAlreadyFinished) {
+			err = nil
+		}
 		return
 	}
 
