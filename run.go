@@ -1,4 +1,3 @@
-// Package run
 package run
 
 import (
@@ -14,7 +13,7 @@ import (
 	"time"
 )
 
-// New Конструктор объекта сущности пакета, возвращается интерфейс пакета.
+// New Конструктор объекта сущности пакета.
 func New() Interface {
 	var run = &impl{
 		bufLen:  bufLength,
@@ -37,7 +36,15 @@ func (run *impl) debug(format string, args ...any) {
 // Инициализатор объекта пакета.
 // Функция вызывается так же при сбросе данных пакета, для переиспользования.
 func (run *impl) init() (err error) {
-	run.debug("инициализация пакета, начато")
+	const (
+		msgInitBeg = "инициализация пакета, начато"
+		msgInitEnd = "инициализация пакета, завершено"
+		errPipeInp = "создание трубы для STDIN прервано ошибкой: %s"
+		errPipeOut = "создание трубы для STDOUT прервано ошибкой: %s"
+		errPipeErr = "создание трубы для STDERR прервано ошибкой: %s"
+	)
+
+	run.debug(msgInitBeg)
 	run.err = nil
 	run.cmd = run.cmd[:0]
 	run.context = nil
@@ -76,15 +83,15 @@ func (run *impl) init() (err error) {
 	run.externalErrCh = nil
 	// Потоки взаимодействия с запускаемым приложением.
 	if run.pipeInpReader, run.pipeInpWriter, err = os.Pipe(); err != nil {
-		err = fmt.Errorf("создание трубы для STDIN прервано ошибкой: %s", err)
+		err = fmt.Errorf(errPipeInp, err)
 		return
 	}
 	if run.pipeOutReader, run.pipeOutWriter, err = os.Pipe(); err != nil {
-		err = fmt.Errorf("создание трубы для STDOUT прервано ошибкой: %s", err)
+		err = fmt.Errorf(errPipeOut, err)
 		return
 	}
 	if run.pipeErrReader, run.pipeErrWriter, err = os.Pipe(); err != nil {
-		err = fmt.Errorf("создание трубы для STDERR прервано ошибкой: %s", err)
+		err = fmt.Errorf(errPipeErr, err)
 		return
 	}
 	run.attributes = &os.ProcAttr{}
@@ -92,7 +99,7 @@ func (run *impl) init() (err error) {
 	run.attributes.Files = append(run.attributes.Files, run.pipeInpReader) // STDIN
 	run.attributes.Files = append(run.attributes.Files, run.pipeOutWriter) // STDOUT
 	run.attributes.Files = append(run.attributes.Files, run.pipeErrWriter) // STDERR
-	run.debug("инициализация пакета, завершено")
+	run.debug(msgInitEnd)
 
 	return
 }
@@ -107,6 +114,17 @@ func (run *impl) Error() error { return run.err }
 // Если передан контекст не равный nil, тогда прерывание через контекст завершает работу приложения аналогично
 // вызову функции Kill().
 func (run *impl) Run(ctx context.Context, args ...string) Interface {
+	const (
+		errRunAlready = "процесс уже запущен, " +
+			"либо пакет используется, выполните функцию Reset(), перед повторным использованием"
+		errWorkdir  = "указана не доступная рабочая директория %q, ошибка: %s"
+		errProg     = "не указана программа для запуска"
+		errProgPath = "поиск программы %q прерван ошибкой: %s"
+		errProc     = "выполнение процесса %q прервано ошибкой: %s"
+		msgGoBeg    = "запуск вспомогательных горутин, начат"
+		msgGoEnd    = "запуск вспомогательных горутин, окончен"
+		msgProc     = "запуск процесса: %s"
+	)
 	var (
 		proc           string
 		doneBeg        chan struct{}
@@ -117,9 +135,7 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 	run.processSync.Lock()
 	defer run.processSync.Unlock()
 	if run.process != nil {
-		run.err = fmt.Errorf(
-			"процесс уже запущен, либо пакет используется, выполните Reset() передповторным использованием",
-		)
+		run.err = fmt.Errorf(errRunAlready)
 		return run
 	}
 	run.processStatus = nil
@@ -136,25 +152,25 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 	// Рабочая директория.
 	if run.attributes.Dir != "" {
 		if _, run.err = os.Stat(run.attributes.Dir); run.err != nil {
-			run.err = fmt.Errorf("указана не доступная рабочая директория %q, ошибка: %s", run.attributes.Dir, run.err)
+			run.err = fmt.Errorf(errWorkdir, run.attributes.Dir, run.err)
 			processCancel()
 			return run
 		}
 	}
 	// Проверка запускаемой программы.
 	if len(args) == 0 {
-		run.err = errors.New("не указана программа для запуска")
+		run.err = errors.New(errProg)
 		processCancel()
 		return run
 	}
 	if proc = run.LookPath(args[0]); run.err != nil {
 		processCancel()
-		run.err = fmt.Errorf("поиск программы %q прерван ошибкой: %s", args[0], run.err)
+		run.err = fmt.Errorf(errProgPath, args[0], run.err)
 		return run
 	}
 	// Запуск вспомогательных горутин с контролем того что они уже запустились и работаю.
 	doneBeg = make(chan struct{})
-	run.debug("запуск вспомогательных горутин, начат")
+	run.debug(msgGoBeg)
 	// STDIN
 	go run.goWriter(doneBeg, run.doneInp, run.pipeInpWriter, run.stdinpCh)
 	<-doneBeg // Ожидание гарантированного старта горутины.
@@ -164,13 +180,13 @@ func (run *impl) Run(ctx context.Context, args ...string) Interface {
 	// STDERR
 	go run.goReader(doneBeg, run.doneErr, run.stdErrCh, run.pipeErrReader)
 	<-doneBeg // Ожидание гарантированного старта горутины.
-	run.debug("запуск вспомогательных горутин, окончен")
+	run.debug(msgGoEnd)
 	// Запуск процесса.
 	run.cmd = make([]string, 0, len(args))
 	run.cmd = append([]string{proc}, args[1:]...)
-	run.debug("запуск процесса: %s", strings.Join(run.cmd, " "))
+	run.debug(msgProc, strings.Join(run.cmd, " "))
 	if run.process, run.err = os.StartProcess(proc, run.cmd, run.attributes); run.err != nil {
-		run.err = fmt.Errorf("выполнение процесса %q прервано ошибкой: %s", proc, run.err)
+		run.err = fmt.Errorf(errProc, proc, run.err)
 		processCancel()
 		return run
 	}
@@ -204,8 +220,9 @@ func (run *impl) RunWait(ctx context.Context, args ...string) (ret *os.ProcessSt
 
 // Wait Ожидание завершения ранее запущенного приложения.
 func (run *impl) Wait() (ret *os.ProcessState, err error) {
+	const errRun = "процесс не запущен"
 	if run.process == nil {
-		err = fmt.Errorf("процесс не запущен")
+		err = fmt.Errorf(errRun)
 		return
 	}
 	run.processWait.Wait()
@@ -231,16 +248,18 @@ func (run *impl) Pid() int {
 
 // Signal Отправка сигнала ранее запущенному приложению.
 func (run *impl) Signal(sig os.Signal) error {
+	const errRun = "процесс не запущен"
 	if run.process == nil {
-		return errors.New("процесс не запущен")
+		return errors.New(errRun)
 	}
 	return run.process.Signal(sig)
 }
 
 // Kill Завершение ранее запущенного приложения.
 func (run *impl) Kill() error {
+	const errRun = "процесс не запущен"
 	if run.process == nil {
-		return errors.New("процесс не запущен")
+		return errors.New(errRun)
 	}
 	return run.process.Kill()
 }
@@ -248,8 +267,9 @@ func (run *impl) Kill() error {
 // Release Освобождение всех ресурсов запущенного приложения.
 // Release необходимо выполнять только в случае если Wait() не работает.
 func (run *impl) Release() error {
+	const errRun = "процесс не запущен"
 	if run.process == nil {
-		return errors.New("процесс не запущен")
+		return errors.New(errRun)
 	}
 	return run.process.Release()
 }
@@ -257,7 +277,13 @@ func (run *impl) Release() error {
 // Reset Завершение приложения, если оно было запущено, сброс всех настроек и подготовка пакета для
 // повторного использования.
 func (run *impl) Reset() Interface {
-	const tryCount = 4
+	const (
+		tryCount   = 4
+		msgSigTerm = "передача процессу %d сигнала SIGTERM (#16)"
+		msgSigKill = "передача процессу %d сигнала SIGKILL (#9)"
+		msgRelease = "освобождение процесса %d"
+		errRelease = "освобождение процесса %d прервано ошибкой: %s"
+	)
 	var (
 		err  error
 		proc *os.Process
@@ -268,7 +294,7 @@ func (run *impl) Reset() Interface {
 	if run.process != nil {
 		pid = run.process.Pid
 		if proc, err = os.FindProcess(pid); err == nil {
-			run.debug("передача процессу %d сигнала SIGTERM (#16)", pid)
+			run.debug(msgSigTerm, pid)
 			for try = 0; try < tryCount && err == nil; try++ {
 				err = proc.Signal(syscall.SIGTERM)
 				<-time.After(time.Second)
@@ -278,7 +304,7 @@ func (run *impl) Reset() Interface {
 	if run.process != nil {
 		pid = run.process.Pid
 		if proc, err = os.FindProcess(pid); err == nil {
-			run.debug("передача процессу %d сигнала SIGKILL (#9)", pid)
+			run.debug(msgSigKill, pid)
 			for try = 0; try < tryCount/2 && err == nil; try++ {
 				err = proc.Kill()
 				<-time.After(time.Second)
@@ -287,8 +313,10 @@ func (run *impl) Reset() Interface {
 	}
 	if run.process != nil {
 		pid = run.process.Pid
-		run.debug("освобождение процесса %d", pid)
-		_ = run.Release()
+		run.debug(msgRelease, pid)
+		if err = run.Release(); err != nil {
+			run.debug(errRelease, pid, err)
+		}
 	}
 	run.processSync.Lock()
 	run.processSync.Unlock()

@@ -1,4 +1,3 @@
-// Package run
 package run
 
 import (
@@ -13,7 +12,7 @@ const (
 	chanLength = 1000
 )
 
-// Объект сущности, реализующий интерфейс Interface.
+// Объект сущности пакета.
 type impl struct {
 	debugMode     bool             // Режим отладки.
 	bufLen        int              // Размер буфера среза байт.

@@ -1,4 +1,3 @@
-// Package run
 package run
 
 // StdInCh Канал с данными для потока STDIN. Канал должен быть закрыт там же где открывался.
@@ -7,16 +6,24 @@ func (run *impl) StdInCh(ch <-chan []byte) Interface { run.externalInpCh = ch; r
 
 // StdIn Данные, отправляемые процессу в поток STDIN после запуска процесса.
 func (run *impl) StdIn(buf []byte) Interface {
-	_, _ = run.bufInp.Write(buf)
+	const errTpl = "запись среза байт в буфер STDIN прервана ошибкой: %s"
+
+	if _, err := run.bufInp.Write(buf); err != nil {
+		run.debug(errTpl, err)
+	}
 	chanSendSignal(run.onNewData)
+
 	return run
 }
 
 // StdOutCh Канал с данными полученными из процесса через поток STDOUT. Канал будет закрыт после завершения
 // процесса. Канал не создаётся, если функция не вызывалась.
 func (run *impl) StdOutCh() (ret <-chan []byte) {
-	run.debug("открыт внешний канал STDOUT")
+	const msgStdOut = "открыт внешний канал STDOUT"
+
+	run.debug(msgStdOut)
 	run.externalOutCh = make(chan []byte, run.chanLen)
+
 	return run.externalOutCh
 }
 
@@ -26,8 +33,11 @@ func (run *impl) StdOut() (ret []byte) { return run.bufOut.Bytes() }
 // StdErrCh Канал с данными полученными из процесса через поток STDERR. Канал будет закрыт после завершения
 // процесса. Канал не создаётся, если функция не вызывалась.
 func (run *impl) StdErrCh() (ret <-chan []byte) {
-	run.debug("открыт внешний канал STDERR")
+	const msgStdErr = "открыт внешний канал STDERR"
+
+	run.debug(msgStdErr)
 	run.externalErrCh = make(chan []byte, run.chanLen)
+
 	return run.externalErrCh
 }
 

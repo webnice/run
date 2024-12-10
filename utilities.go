@@ -1,4 +1,3 @@
-// Package run
 package run
 
 import (
@@ -16,6 +15,7 @@ func (run *impl) bytesCopySlice(b []byte) (n int, ret []byte) {
 
 // Функция выполняет задачу копирования данных из потока в канал.
 func (run *impl) goReader(onBegCh chan<- struct{}, onEndCh chan<- struct{}, outputCh chan<- []byte, inputFh *os.File) {
+	const errReaderClose = "закрытие канала чтения данных прервано ошибкой: %s"
 	var (
 		err error
 		buf []byte
@@ -32,13 +32,19 @@ func (run *impl) goReader(onBegCh chan<- struct{}, onEndCh chan<- struct{}, outp
 			break
 		}
 	}
-	_ = inputFh.Close()
+	if err = inputFh.Close(); err != nil {
+		run.debug(errReaderClose, err)
+	}
 	chanClose(outputCh)
 	chanSendSignal(onEndCh)
 }
 
 // Функция выполняет задачу копирования данных из канала в поток.
 func (run *impl) goWriter(onBegCh chan<- struct{}, onEndCh chan<- struct{}, outputFh *os.File, inputCh <-chan []byte) {
+	const (
+		errWriter = "запись данных в исходящий поток прервана ошибкой: %s"
+		errClose  = "закрытие потока записи данных прервана ошибкой: %s"
+	)
 	var (
 		err  error
 		buf  []byte
@@ -50,54 +56,75 @@ func (run *impl) goWriter(onBegCh chan<- struct{}, onEndCh chan<- struct{}, outp
 		j, tmp := run.bytesCopySlice(buf)
 		for n = 0; len(tmp[n:j]) > 0; {
 			if k, err = outputFh.Write(tmp[n:j]); err != nil {
+				run.debug(errWriter, err)
 				break
 			}
 			n += k
 		}
 	}
-	_ = outputFh.Close()
+	if err = outputFh.Close(); err != nil {
+		run.debug(errClose, err)
+	}
 	chanSendSignal(onEndCh)
 }
 
 // Функция выполняет задачу ожидания завершения запущенного процесса и закрытие всех каналов и потоков данных.
 func (run *impl) goProcessWait(onBegCh chan<- struct{}, cancelFn context.CancelFunc) {
+	const (
+		msgPidBeg    = "процесс PID: %d запушен"
+		msgPidEnd    = "процесс PID: %d завершён"
+		mcgCloseChan = "закрытие каналов обмена данными"
+		msgCloseOut  = "закрыт внешний канал STDOUT"
+		msgCloseErr  = "закрыт внешний канал STDERR"
+		msgStopBeg   = "завершение вспомогательных горутин, начато"
+		msgStopEnd   = "завершение вспомогательных горутин, окончено"
+		errCloseInp  = "закрытие трубы STDIN прервано ошибкой: %s"
+		errCloseOut  = "закрытие трубы STDOUT прервано ошибкой: %s"
+		errCloseErr  = "закрытие трубы STDERR прервано ошибкой: %s"
+	)
 	var err error
 
 	chanSendSignal(onBegCh)
 	run.processSync.Lock()
-	run.debug("процесс PID: %d запушен", run.process.Pid)
+	run.debug(msgPidBeg, run.process.Pid)
 	// Ожидание завершения запущенного процесса.
 	if run.processStatus, err = run.process.Wait(); run.err == nil && err != nil {
 		run.err = err
 	}
-	run.debug("процесс PID: %d завершён", run.process.Pid)
+	run.debug(msgPidEnd, run.process.Pid)
 	// Отправка сигнала завершения в горутину обработки данных.
 	cancelFn()
 	run.process = nil
 	// Закрытие канала и файловых дескрипторов, это вызовет завершение горутин.
-	run.debug("закрытие каналов обмена данными")
+	run.debug(mcgCloseChan)
 	chanClose(run.stdinpCh)
-	_ = run.pipeInpReader.Close() // STDIN
-	_ = run.pipeOutWriter.Close() // STDOUT
-	_ = run.pipeErrWriter.Close() // STDERR
+	if err = run.pipeInpReader.Close(); err != nil { // STDIN
+		run.debug(errCloseInp, err)
+	}
+	if err = run.pipeOutWriter.Close(); err != nil { // STDOUT
+		run.debug(errCloseOut, err)
+	}
+	if err = run.pipeErrWriter.Close(); err != nil { // STDERR
+		run.debug(errCloseErr, err)
+	}
 	// Закрытие каналов передаваемых вовне.
 	if run.externalOutCh != nil {
-		run.debug("закрыт внешний канал STDOUT")
+		run.debug(msgCloseOut)
 		chanClose(run.externalOutCh)
 		run.externalOutCh = nil
 	}
 	if run.externalErrCh != nil {
-		run.debug("закрыт внешний канал STDERR")
+		run.debug(msgCloseErr)
 		chanClose(run.externalErrCh)
 		run.externalErrCh = nil
 	}
 	// Ожидание завершения горутин.
-	run.debug("завершение вспомогательных горутин, начато")
+	run.debug(msgStopBeg)
 	<-run.doneInp
 	<-run.doneOut
 	<-run.doneErr
 	<-run.doneData
-	run.debug("завершение вспомогательных горутин, окончено")
+	run.debug(msgStopEnd)
 	// Снятие блокировок.
 	run.processWait.Done()
 	run.processSync.Unlock()
@@ -108,6 +135,13 @@ func (run *impl) goProcessWait(onBegCh chan<- struct{}, cancelFn context.CancelF
 // 2. Передача данных между каналами;
 // 3. Обработка события прерывания через контекст;
 func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{}, ctx context.Context) {
+	const (
+		msgProcBeg  = "поток обмена данных запущен"
+		msgProcEnd  = "поток обмена данных завершён"
+		msgCancel   = "получен сигнал прерывания через контекст"
+		msgToStdInp = "получен срез данных для передачи в STDIN"
+		msgFrStdInp = "получены данные из канала для передачи в STDIN"
+	)
 	var (
 		err  error
 		end  bool
@@ -116,7 +150,7 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 		n, k int
 	)
 
-	run.debug("поток обмена данных запущен")
+	run.debug(msgProcBeg)
 	buf, ext = make([]byte, run.bufLen), make([]byte, run.bufLen)
 	chanSendSignal(onBegCh)
 	for {
@@ -126,7 +160,7 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 		select {
 		// Обработка сигнала завершения обработки данных после завершения работы процесса.
 		case <-ctx.Done():
-			run.debug("получен сигнал прерывания через контекст")
+			run.debug(msgCancel)
 			if end = true; run.process != nil {
 				if err = run.Kill(); run.err == nil && err != nil {
 					run.err = err
@@ -135,7 +169,7 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 			continue
 		// Событие поступление новых данных в функцию STDIN.
 		case <-run.onNewData:
-			run.debug("получен срез данных для передачи в STDIN")
+			run.debug(msgToStdInp)
 			for {
 				if run.bufInp.Len() <= 0 {
 					break
@@ -176,7 +210,7 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 			if len(ext) <= 0 {
 				continue
 			}
-			run.debug("получены данные из канала для передачи в STDIN")
+			run.debug(msgFrStdInp)
 			for n = 0; len(ext[n:]) > 0; {
 				j, tmp := run.bytesCopySlice(ext[n:])
 				n += j
@@ -185,7 +219,7 @@ func (run *impl) goProcessData(onBegCh chan<- struct{}, onEndCh chan<- struct{},
 		}
 	}
 	chanSendSignal(onEndCh)
-	run.debug("поток обмена данных завершён")
+	run.debug(msgProcEnd)
 }
 
 // Закрытие канала с защитой от паники.
